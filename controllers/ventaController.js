@@ -1,15 +1,15 @@
-const { 
-    Venta, 
-    Usuario, 
-    DetalleVenta, 
-    Producto, 
-    Tecnica, 
-    Insumo, 
+const {
+    Venta,
+    Usuario,
+    DetalleVenta,
+    Producto,
+    Tecnica,
+    Insumo,
     InventarioProducto,
-    Color,    
-    Talla,    
-    Estado,   
-    sequelize 
+    Color,
+    Talla,
+    Estado,
+    sequelize
 } = require('../models');
 
 const { Op } = require('sequelize');
@@ -89,12 +89,46 @@ exports.getVentaById = async (req, res) => {
 };
 
 // CREAR VENTA CON DESCUENTO DE STOCK
+// CREAR VENTA CON DESCUENTO DE STOCK
 exports.crearVenta = async (req, res) => {
     try {
-        const { DocumentoID, Subtotal, Total, EstadoID, detalles } = req.body;
+        const {
+            DocumentoID,
+            Subtotal,
+            Total,
+            EstadoID,
+            detalles,
+            // CAMPOS OPCIONALES DE MÉTODO DE PAGO
+            metodoPago,
+            comprobanteTransferencia,
+            fechaTransferencia,
+            nombreReceptor,
+            telefonoEntrega,
+            direccionEntrega
+        } = req.body;
 
+        // Validaciones básicas
         if (!DocumentoID || !detalles || detalles.length === 0) {
             return res.status(400).json({ error: "Faltan datos obligatorios" });
+        }
+
+        // 🔹 VALIDAR MÉTODO DE PAGO SOLO SI SE PROPORCIONA
+        if (metodoPago) {
+            if (metodoPago === 'transferencia') {
+                if (!comprobanteTransferencia) {
+                    return res.status(400).json({
+                        error: "Debe proporcionar el comprobante de transferencia"
+                    });
+                }
+            }
+
+            if (metodoPago === 'contraentrega') {
+                if (!nombreReceptor || !telefonoEntrega || !direccionEntrega) {
+                    return res.status(400).json({
+                        error: "Complete todos los datos de entrega (nombre, teléfono y dirección)"
+                    });
+                }
+            }
         }
 
         // VALIDAR STOCK ANTES DE CREAR LA VENTA
@@ -120,12 +154,19 @@ exports.crearVenta = async (req, res) => {
             }
         }
 
-        // Crear la venta
+        // 🔹 CREAR LA VENTA (método de pago es opcional)
         const nuevaVenta = await Venta.create({
             DocumentoID,
             Subtotal,
             Total,
-            EstadoID: EstadoID || 8 // 8 = Pendiente por defecto
+            EstadoID: EstadoID || 8, // 8 = Pendiente por defecto
+            // Solo incluir si se proporciona
+            MetodoPago: metodoPago || null,
+            ComprobanteTransferencia: metodoPago === 'transferencia' ? comprobanteTransferencia : null,
+            FechaTransferencia: metodoPago === 'transferencia' ? (fechaTransferencia || new Date()) : null,
+            NombreReceptor: metodoPago === 'contraentrega' ? nombreReceptor : null,
+            TelefonoEntrega: metodoPago === 'contraentrega' ? telefonoEntrega : null,
+            DireccionEntrega: metodoPago === 'contraentrega' ? direccionEntrega : null
         });
 
         // Crear detalles y descontar stock
@@ -167,6 +208,7 @@ exports.crearVenta = async (req, res) => {
     }
 };
 
+
 // 🆕 ACTUALIZAR ESTADO DE VENTA (con lógica de devolución de stock si se cancela)
 exports.updateEstadoVenta = async (req, res) => {
     try {
@@ -200,11 +242,11 @@ exports.updateEstadoVenta = async (req, res) => {
         console.log(`Estado anterior: ${estadoAnterior}`);
         console.log(`Estado nuevo: ${estadoNuevo}`);
 
-        // 🔄 LÓGICA: Si se cancela una venta pendiente, DEVOLVER el stock
-        // EstadoID 10 = Cancelada (verifica con tu tabla Estados)
-        if (estadoAnterior === 8 && estadoNuevo === 10) {
-            console.log('\n📦 DEVOLVIENDO STOCK (venta cancelada)...');
-            
+        // LÓGICA: Si se cancela una venta pendiente, DEVOLVER el stock
+        // EstadoID 13 = Cancelada 
+        if (estadoAnterior === 8 && estadoNuevo === 13) {
+            console.log('\nDEVOLVIENDO STOCK (venta cancelada)...');
+
             for (const detalle of venta.detalles) {
                 await InventarioProducto.increment('Stock', {
                     by: detalle.Cantidad,
@@ -341,7 +383,7 @@ exports.deleteVenta = async (req, res) => {
         // Eliminar venta
         await venta.destroy();
 
-        res.json({ 
+        res.json({
             message: 'Venta eliminada exitosamente',
             stockDevuelto: venta.EstadoID === 8
         });
@@ -468,7 +510,7 @@ exports.getDashboardData = async (req, res) => {
         });
 
         const mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-        
+
         const formatearDatos = (datos) => {
             return datos.map(item => ({
                 mes: mesesNombres[item.mes - 1],

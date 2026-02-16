@@ -9,8 +9,12 @@ const PORT = process.env.PORT || 3000;
 
 
 // ==================== MIDDLEWARES ====================
-app.use(cors());
-app.use(express.json({ limit: '50mb' })); 
+// Permitir TODAS las peticiones en desarrollo
+app.use(cors({
+    origin: '*',
+    credentials: true
+}));
+app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 
@@ -174,48 +178,48 @@ db.sequelize.authenticate()
     .then(() => {
         console.log('Conexión a la base de datos exitosa');
 
-    app.listen(PORT, () => {
-        console.log('\n' + '='.repeat(60));
-        console.log('SERVIDOR STAMPLAB INICIADO CORRECTAMENTE');
-        console.log('='.repeat(60));
-        console.log(`URL: http://localhost:${PORT}`);
-        console.log(`Base de datos: ${db.sequelize.config.database}`);
-        console.log(`Dialect: ${db.sequelize.options.dialect}`);
-        console.log(`Entorno: ${process.env.NODE_ENV || 'development'}`);
-        console.log('='.repeat(60));
-        console.log('ENDPOINTS DISPONIBLES:');
-        console.log('');
-        console.log('Usuarios y Permisos:');
-        console.log('   • http://localhost:' + PORT + '/api/roles');
-        console.log('   • http://localhost:' + PORT + '/api/permisos');
-        console.log('   • http://localhost:' + PORT + '/api/privilegios');
-        console.log('   • http://localhost:' + PORT + '/api/usuarios');
-        console.log('');
-        console.log('Catálogo:');
-        console.log('   • http://localhost:' + PORT + '/api/productos');
-        console.log('   • http://localhost:' + PORT + '/api/colores');
-        console.log('   • http://localhost:' + PORT + '/api/tallas');
-        console.log('   • http://localhost:' + PORT + '/api/insumos');
-        console.log('   • http://localhost:' + PORT + '/api/tecnicas');
-        console.log('');
-        console.log('Compras y Proveedores:');
-        console.log('   • http://localhost:' + PORT + '/api/proveedores');
-        console.log('   • http://localhost:' + PORT + '/api/compras');
-        console.log('');
-        console.log('Cotizaciones:');
-        console.log('   • http://localhost:' + PORT + '/api/cotizaciones');
-        console.log('   • http://localhost:' + PORT + '/api/detallecotizaciones');
-        console.log('');
-        console.log('Ventas:');
-        console.log('   • http://localhost:' + PORT + '/api/ventas');
-        console.log('   • http://localhost:' + PORT + '/api/detalleventas');
-        console.log('');
-        console.log('='.repeat(60));
-        console.log('Todo listo para recibir peticiones');
-        console.log('='.repeat(60) + '\n');
+        app.listen(PORT, () => {
+            console.log('\n' + '='.repeat(60));
+            console.log('SERVIDOR STAMPLAB INICIADO CORRECTAMENTE');
+            console.log('='.repeat(60));
+            console.log(`URL: http://localhost:${PORT}`);
+            console.log(`Base de datos: ${db.sequelize.config.database}`);
+            console.log(`Dialect: ${db.sequelize.options.dialect}`);
+            console.log(`Entorno: ${process.env.NODE_ENV || 'development'}`);
+            console.log('='.repeat(60));
+            console.log('ENDPOINTS DISPONIBLES:');
+            console.log('');
+            console.log('Usuarios y Permisos:');
+            console.log('   • http://localhost:' + PORT + '/api/roles');
+            console.log('   • http://localhost:' + PORT + '/api/permisos');
+            console.log('   • http://localhost:' + PORT + '/api/privilegios');
+            console.log('   • http://localhost:' + PORT + '/api/usuarios');
+            console.log('');
+            console.log('Catálogo:');
+            console.log('   • http://localhost:' + PORT + '/api/productos');
+            console.log('   • http://localhost:' + PORT + '/api/colores');
+            console.log('   • http://localhost:' + PORT + '/api/tallas');
+            console.log('   • http://localhost:' + PORT + '/api/insumos');
+            console.log('   • http://localhost:' + PORT + '/api/tecnicas');
+            console.log('');
+            console.log('Compras y Proveedores:');
+            console.log('   • http://localhost:' + PORT + '/api/proveedores');
+            console.log('   • http://localhost:' + PORT + '/api/compras');
+            console.log('');
+            console.log('Cotizaciones:');
+            console.log('   • http://localhost:' + PORT + '/api/cotizaciones');
+            console.log('   • http://localhost:' + PORT + '/api/detallecotizaciones');
+            console.log('');
+            console.log('Ventas:');
+            console.log('   • http://localhost:' + PORT + '/api/ventas');
+            console.log('   • http://localhost:' + PORT + '/api/detalleventas');
+            console.log('');
+            console.log('='.repeat(60));
+            console.log('Todo listo para recibir peticiones');
+            console.log('='.repeat(60) + '\n');
+        });
+    }).catch(err => {
+        console.error('Error al conectar con la base de datos:', err);
+        process.exit(1);
     });
-}).catch(err => {
-    console.error('Error al conectar con la base de datos:', err);
-    process.exit(1);
-});
 

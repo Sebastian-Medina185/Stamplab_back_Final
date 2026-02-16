@@ -25,5 +25,10 @@ router.post('/completa', cotizacionController.createCotizacionCompleta);
 // Convertir cotización aprobada a venta (con descuento de stock)
 router.post('/:cotizacionID/convertir-a-venta', cotizacionController.convertirCotizacionAVenta);
 
+// NUEVA RUTA: Cancelar cotización (devuelve stock si es necesario)
+router.put('/:cotizacionID/cancelar', cotizacionController.cancelarCotizacion);
+
+// Nueva Ruta
+router.get('/usuario/:documentoID', cotizacionController.getCotizacionesByUsuario);
 
 module.exports = router;

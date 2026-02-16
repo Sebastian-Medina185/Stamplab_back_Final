@@ -21,6 +21,16 @@ const {
 
 const { Op } = require('sequelize');
 
+
+// Agregar esta función helper al inicio del archivo
+function obtenerNombreProducto(detalle) {
+    if (detalle.TraePrenda) {
+        return "Prenda llevada por el cliente";
+    }
+    return detalle.producto?.Nombre || "Producto sin especificar";
+}
+
+
 // ============================================
 // FUNCIÓN PRINCIPAL: CREAR COTIZACIÓN INTELIGENTE
 // ============================================
@@ -325,7 +335,7 @@ exports.convertirCotizacionAVenta = async (req, res) => {
         });
 
         if (!cotizacion) {
-            console.error('❌ Cotización no encontrada');
+            console.error('Cotización no encontrada');
             return res.status(404).json({
                 message: 'Cotización no encontrada',
                 cotizacionID
@@ -337,7 +347,7 @@ exports.convertirCotizacionAVenta = async (req, res) => {
         console.log('   EstadoID:', cotizacion.EstadoID);
 
         if (cotizacion.EstadoID !== 2) { // 2 = Aprobada
-            console.error('❌ Estado incorrecto:', cotizacion.EstadoID);
+            console.error('Estado incorrecto:', cotizacion.EstadoID);
             return res.status(400).json({
                 message: 'Solo se pueden convertir cotizaciones aprobadas',
                 estadoActual: cotizacion.estado?.Nombre || cotizacion.EstadoID,
@@ -355,26 +365,47 @@ exports.convertirCotizacionAVenta = async (req, res) => {
         }
 
         // ========================================
-        // ✅ VALIDAR STOCK DISPONIBLE - FIX DEFINITIVO
+        // ✅ VALIDAR STOCK SOLO SI NO ES PRENDA PROPIA (CORREGIDO)
         // ========================================
-        console.log('\n🔍 VALIDANDO STOCK...');
+        console.log('\n🔍 VALIDANDO REQUISITOS...');
 
         for (const detalle of cotizacion.detalles) {
-            const colorID = detalle.colores?.[0]?.ColorID;
-            const tallaID = detalle.tallas?.[0]?.TallaID;
             const productoNombre = detalle.producto?.Nombre || `Producto ${detalle.ProductoID}`;
 
-            console.log(`   ${productoNombre}:`);
+            // ✅ PRIMERO: Verificar TraePrenda ANTES de acceder a colorID/tallaID
+            const traePrenda = Boolean(detalle.TraePrenda);
+
+            console.log(`\n   📦 ${productoNombre}:`);
+            console.log(`      TraePrenda: ${traePrenda}`);
+            console.log(`      Cantidad: ${detalle.Cantidad}`);
+
+            // ✅ SI TRAE PRENDA PROPIA, OMITIR TODA LA VALIDACIÓN
+            if (traePrenda) {
+                console.log(`      ⚠️ Es prenda propia - No requiere stock`);
+                console.log(`      ✓ Validación omitida correctamente`);
+                continue; // Saltar al siguiente detalle inmediatamente
+            }
+
+            // ✅ SOLO SI NO TRAE PRENDA, ENTONCES VALIDAR STOCK
+            console.log(`      🔍 Prenda del inventario - Validando stock...`);
+
+            const colorID = detalle.colores?.[0]?.ColorID;
+            const tallaID = detalle.tallas?.[0]?.TallaID;
+
             console.log(`      ProductoID: ${detalle.ProductoID}`);
             console.log(`      ColorID: ${colorID}`);
             console.log(`      TallaID: ${tallaID}`);
-            console.log(`      Cantidad requerida: ${detalle.Cantidad}`);
 
+            // Validar que existan color y talla
             if (!colorID || !tallaID) {
-                throw new Error(`Cotización sin color/talla especificada en ${productoNombre}`);
+                throw new Error(
+                    `❌ ERROR: Cotización sin color/talla especificada en ${productoNombre}.\n` +
+                    `   Solución: Si el cliente trae prenda propia, marca TraePrenda=true en la base de datos.\n` +
+                    `   ProductoID: ${detalle.ProductoID}, ColorID: ${colorID}, TallaID: ${tallaID}`
+                );
             }
 
-            // ✅ SOLUCIÓN DEFINITIVA: Query directa sin includes
+            // Validar que exista la variante en inventario
             const variante = await InventarioProducto.findOne({
                 where: {
                     ProductoID: detalle.ProductoID,
@@ -384,12 +415,10 @@ exports.convertirCotizacionAVenta = async (req, res) => {
                 attributes: ['InventarioID', 'ProductoID', 'ColorID', 'TallaID', 'Stock']
             });
 
-            console.log('   Consulta ejecutada');
-
             if (!variante) {
                 throw new Error(
-                    `No existe variante en inventario para:\n` +
-                    `  - ${productoNombre}\n` +
+                    `❌ No existe variante en inventario para:\n` +
+                    `  - Producto: ${productoNombre}\n` +
                     `  - Color ID: ${colorID}\n` +
                     `  - Talla ID: ${tallaID}`
                 );
@@ -399,22 +428,22 @@ exports.convertirCotizacionAVenta = async (req, res) => {
 
             if (variante.Stock < detalle.Cantidad) {
                 throw new Error(
-                    `Stock insuficiente para ${productoNombre}:\n` +
+                    `❌ Stock insuficiente para ${productoNombre}:\n` +
                     `  - Disponible: ${variante.Stock}\n` +
                     `  - Necesario: ${detalle.Cantidad}\n` +
                     `  - Faltante: ${detalle.Cantidad - variante.Stock}`
                 );
             }
 
-            console.log(`      ✓ Stock suficiente`);
+            console.log(`      ✅ Stock suficiente`);
         }
 
-        console.log('\n✅ Validación de stock completada exitosamente');
+        console.log('\n✅ Validación completada exitosamente\n');
 
         // ========================================
         // CREAR VENTA
         // ========================================
-        console.log('\n📝 CREANDO VENTA...');
+        console.log('📝 CREANDO VENTA...');
         const nuevaVenta = await Venta.create({
             DocumentoID: cotizacion.DocumentoID,
             FechaVenta: new Date(),
@@ -423,16 +452,17 @@ exports.convertirCotizacionAVenta = async (req, res) => {
             EstadoID: 8 // PENDIENTE
         });
 
-        console.log(`✓ Venta creada con ID: ${nuevaVenta.VentaID}`);
+        console.log(`✓ Venta creada con ID: ${nuevaVenta.VentaID}\n`);
 
         // ========================================
         // CREAR DETALLES Y DESCONTAR STOCK
         // ========================================
-        console.log('\n📦 CREANDO DETALLES Y DESCONTANDO STOCK...');
-        
+        console.log('📦 CREANDO DETALLES Y DESCONTANDO STOCK...\n');
+
         for (const detalle of cotizacion.detalles) {
-            const tallaID = detalle.tallas?.[0]?.TallaID;
-            const colorID = detalle.colores?.[0]?.ColorID;
+            const traePrenda = Boolean(detalle.TraePrenda);
+            const tallaID = detalle.tallas?.[0]?.TallaID || null;
+            const colorID = detalle.colores?.[0]?.ColorID || null;
 
             // Calcular precio unitario
             const precioBase = parseFloat(detalle.producto?.PrecioBase) || 0;
@@ -442,50 +472,58 @@ exports.convertirCotizacionAVenta = async (req, res) => {
                 sum + (parseFloat(t.CostoTecnica) || 0), 0) || 0;
             const precioUnitario = precioBase + precioTalla + precioTela + costoTecnicas;
 
-            console.log(`   ${detalle.producto?.Nombre}:`);
+            console.log(`   📦 ${detalle.producto?.Nombre}:`);
             console.log(`      Precio unitario: $${precioUnitario.toLocaleString()}`);
+            console.log(`      Cantidad: ${detalle.Cantidad}`);
+            console.log(`      TraePrenda: ${traePrenda}`);
 
             // Crear detalle de venta
             await DetalleVenta.create({
                 VentaID: nuevaVenta.VentaID,
                 ProductoID: detalle.ProductoID,
-                ColorID: colorID,
-                TallaID: tallaID,
+                ColorID: colorID,  // Puede ser null si trae prenda
+                TallaID: tallaID,  // Puede ser null si trae prenda
                 Cantidad: detalle.Cantidad,
                 PrecioUnitario: precioUnitario
             });
 
-            console.log(`      ✓ Detalle de venta creado`);
+            console.log(`      ✅ Detalle de venta creado`);
 
-            // ✅ DESCONTAR STOCK - También simplificado
-            const [affectedRows] = await InventarioProducto.decrement(
-                'Stock',
-                {
-                    by: detalle.Cantidad,
-                    where: {
-                        ProductoID: detalle.ProductoID,
-                        ColorID: colorID,
-                        TallaID: tallaID
+            // ✅ DESCONTAR STOCK SOLO SI NO ES PRENDA PROPIA
+            if (!traePrenda && colorID && tallaID) {
+                const [affectedRows] = await InventarioProducto.decrement(
+                    'Stock',
+                    {
+                        by: detalle.Cantidad,
+                        where: {
+                            ProductoID: detalle.ProductoID,
+                            ColorID: colorID,
+                            TallaID: tallaID
+                        }
                     }
-                }
-            );
+                );
 
-            console.log(`      ✓ Stock descontado: ${detalle.Cantidad} unidades`);
-            
-            if (affectedRows === 0) {
-                console.warn(`      ⚠️ Advertencia: No se afectaron filas al descontar stock`);
+                console.log(`      Stock descontado: ${detalle.Cantidad} unidades`);
+
+                if (affectedRows === 0) {
+                    console.warn(`      Advertencia: No se afectaron filas al descontar stock`);
+                }
+            } else {
+                console.log(`      Prenda propia - Stock no descontado`);
             }
+
+            console.log(''); // Línea en blanco entre productos
         }
 
         // ========================================
         // ACTUALIZAR ESTADO A "PROCESADA" (ID 14)
         // ========================================
-        console.log('\n🔄 ACTUALIZANDO ESTADO DE COTIZACIÓN...');
+        console.log('ACTUALIZANDO ESTADO DE COTIZACIÓN...');
         await cotizacion.update({ EstadoID: 14 });
-        console.log('✓ Estado actualizado a PROCESADA (ID: 14)');
+        console.log('✓ Estado actualizado a PROCESADA (ID: 14)\n');
 
-        console.log('\n' + '='.repeat(60));
-        console.log('✅ CONVERSIÓN EXITOSA');
+        console.log('='.repeat(60));
+        console.log('CONVERSIÓN EXITOSA');
         console.log('='.repeat(60) + '\n');
 
         return res.status(201).json({
@@ -504,7 +542,7 @@ exports.convertirCotizacionAVenta = async (req, res) => {
 
     } catch (error) {
         console.error('\n' + '='.repeat(60));
-        console.error('❌ ERROR AL CONVERTIR COTIZACIÓN');
+        console.error('ERROR AL CONVERTIR COTIZACIÓN');
         console.error('='.repeat(60));
         console.error('Mensaje:', error.message);
         console.error('Stack:', error.stack);
@@ -517,6 +555,7 @@ exports.convertirCotizacionAVenta = async (req, res) => {
         });
     }
 };
+
 
 // ============================================
 // CREAR VENTA DIRECTA (SIN DISEÑOS) + DESCUENTO DE STOCK
@@ -531,48 +570,66 @@ async function crearVentaDirecta(req, res, { DocumentoID, FechaCotizacion, detal
         // ========================================
         // PASO 1: VALIDAR STOCK DISPONIBLE - CORREGIDO
         // ========================================
-        console.log('\n🔍 VALIDANDO STOCK DISPONIBLE...');
+        console.log('\nVALIDANDO STOCK DISPONIBLE...');
         for (const detalle of detalles) {
             const colorID = detalle.colores?.[0]?.ColorID;
             const tallaID = detalle.tallas?.[0]?.TallaID;
+            const telaID = detalle.insumos?.[0]?.InsumoID; // INCLUIR TELA
             const cantidad = parseInt(detalle.Cantidad);
 
             if (!colorID || !tallaID) {
                 throw new Error('Se requiere Color y Talla para validar stock');
             }
 
-            // ✅ FIX: Usar sequelize.col()
+            console.log(`   Buscando variante:`);
+            console.log(`   - ProductoID: ${detalle.ProductoID}`);
+            console.log(`   - ColorID: ${colorID}`);
+            console.log(`   - TallaID: ${tallaID}`);
+            console.log(`   - TelaID: ${telaID}`); // ✅ LOG
+
+            // CORRECCIÓN: Incluir TelaID en la búsqueda
+            const whereConditions = {
+                ProductoID: detalle.ProductoID,
+                ColorID: colorID,
+                TallaID: tallaID
+            };
+
+            // Solo agregar TelaID si existe (puede ser null)
+            if (telaID !== undefined && telaID !== null) {
+                whereConditions.TelaID = telaID;
+            }
+
             const variante = await InventarioProducto.findOne({
-                where: {
-                    [Op.and]: [
-                        sequelize.where(sequelize.col('InventarioProducto.ProductoID'), detalle.ProductoID),
-                        sequelize.where(sequelize.col('InventarioProducto.ColorID'), colorID),
-                        sequelize.where(sequelize.col('InventarioProducto.TallaID'), tallaID)
-                    ]
-                }
+                where: whereConditions
             });
 
             if (!variante) {
+                const producto = await Producto.findByPk(detalle.ProductoID);
                 throw new Error(
-                    `No existe variante para Producto ${detalle.ProductoID}, ` +
-                    `Color ${colorID}, Talla ${tallaID}`
+                    `No existe variante en inventario para:\n` +
+                    `  - Producto: ${producto?.Nombre || detalle.ProductoID}\n` +
+                    `  - Color ID: ${colorID}\n` +
+                    `  - Talla ID: ${tallaID}\n` +
+                    `  - Tela ID: ${telaID || 'Sin tela'}\n\n` +
+                    `Verifica que esta combinación esté registrada en el inventario.`
                 );
             }
 
             if (variante.Stock < cantidad) {
+                const producto = await Producto.findByPk(detalle.ProductoID);
                 throw new Error(
-                    `Stock insuficiente para ${variante.producto?.Nombre || 'producto'}. ` +
+                    `Stock insuficiente para ${producto?.Nombre || 'producto'}.\n` +
                     `Disponible: ${variante.Stock}, Solicitado: ${cantidad}`
                 );
             }
 
-            console.log(`   ✓ Stock validado - Producto ${detalle.ProductoID}: ${variante.Stock} disponibles`);
+            console.log(`   ✓ Stock validado - ${variante.Stock} disponibles`);
         }
 
         // ========================================
         // PASO 2: CALCULAR PRECIOS
         // ========================================
-        console.log('\n💰 CALCULANDO PRECIOS...');
+        console.log('\nCALCULANDO PRECIOS...');
         for (const detalle of detalles) {
             const producto = await Producto.findByPk(detalle.ProductoID);
             if (!producto) {
@@ -612,12 +669,12 @@ async function crearVentaDirecta(req, res, { DocumentoID, FechaCotizacion, detal
             });
         }
 
-        console.log(`\n📊 Subtotal total: $${subtotal.toLocaleString()}`);
+        console.log(`\nSubtotal total: $${subtotal.toLocaleString()}`);
 
         // ========================================
         // PASO 3: CREAR LA VENTA
         // ========================================
-        console.log('\n📝 CREANDO VENTA...');
+        console.log('\nCREANDO VENTA...');
         const nuevaVenta = await Venta.create({
             DocumentoID,
             FechaVenta: FechaCotizacion || new Date(),
@@ -644,22 +701,29 @@ async function crearVentaDirecta(req, res, { DocumentoID, FechaCotizacion, detal
         // PASO 5: DESCONTAR STOCK - CORREGIDO
         // ========================================
         console.log('\n📦 DESCONTANDO STOCK...');
-        for (const detalle of detallesCalculados) {
-            await InventarioProducto.decrement(
-                'Stock',
-                {
-                    by: detalle.Cantidad,
-                    where: {
-                        [Op.and]: [
-                            sequelize.where(sequelize.col('ProductoID'), detalle.ProductoID),
-                            sequelize.where(sequelize.col('ColorID'), detalle.ColorID),
-                            sequelize.where(sequelize.col('TallaID'), detalle.TallaID)
-                        ]
-                    }
-                }
-            );
+        for (let i = 0; i < detalles.length; i++) {
+            const detalleOriginal = detalles[i];
+            const detalleCalculado = detallesCalculados[i];
 
-            console.log(`   ✓ Descontado ${detalle.Cantidad} unidades de Producto ${detalle.ProductoID}`);
+            const telaID = detalleOriginal.insumos?.[0]?.InsumoID;
+
+            // CORRECCIÓN: Incluir TelaID en el descuento
+            const whereConditions = {
+                ProductoID: detalleCalculado.ProductoID,
+                ColorID: detalleCalculado.ColorID,
+                TallaID: detalleCalculado.TallaID
+            };
+
+            if (telaID !== undefined && telaID !== null) {
+                whereConditions.TelaID = telaID;
+            }
+
+            await InventarioProducto.decrement('Stock', {
+                by: detalleCalculado.Cantidad,
+                where: whereConditions
+            });
+
+            console.log(`   ✓ Descontado ${detalleCalculado.Cantidad} unidades de Producto ${detalleCalculado.ProductoID}`);
         }
 
         console.log('='.repeat(60) + '\n');
@@ -684,7 +748,7 @@ async function crearVentaDirecta(req, res, { DocumentoID, FechaCotizacion, detal
 async function crearCotizacionConDiseños(req, res, { DocumentoID, FechaCotizacion, detalles, usuario }) {
     try {
         console.log('\nCREANDO COTIZACIÓN CON DISEÑOS...');
-        console.log('⚠️  El stock NO se descuenta en cotizaciones (solo es presupuesto)');
+        console.log('El stock NO se descuenta en cotizaciones (solo es presupuesto)');
 
         // Crear la cotización con estado "Pendiente" (EstadoID = 1)
         const nuevaCotizacion = await Cotizacion.create({
@@ -804,140 +868,6 @@ async function crearCotizacionConDiseños(req, res, { DocumentoID, FechaCotizaci
     }
 }
 
-// ============================================
-// NUEVA FUNCIÓN: CONVERTIR COTIZACIÓN A VENTA
-// ============================================
-exports.convertirCotizacionAVenta = async (req, res) => {
-    try {
-        const { cotizacionID } = req.params;
-
-        console.log('\n' + '='.repeat(60));
-        console.log('CONVIRTIENDO COTIZACIÓN A VENTA');
-        console.log('='.repeat(60));
-
-        // Obtener cotización completa
-        const cotizacion = await Cotizacion.findByPk(cotizacionID, {
-            include: [
-                {
-                    model: DetalleCotizacion,
-                    as: 'detalles',
-                    include: [
-                        { model: Producto, as: 'producto' },
-                        { model: CotizacionTalla, as: 'tallas', include: [{ model: Talla, as: 'talla' }] },
-                        { model: CotizacionColor, as: 'colores' },
-                        { model: CotizacionInsumo, as: 'insumos', include: [{ model: Insumo, as: 'insumo' }] },
-                        { model: CotizacionTecnica, as: 'tecnicas' }
-                    ]
-                }
-            ]
-        });
-
-        if (!cotizacion) {
-            return res.status(404).json({ message: 'Cotización no encontrada' });
-        }
-
-        if (cotizacion.EstadoID !== 2) { // 2 = Aprobada
-            return res.status(400).json({
-                message: 'Solo se pueden convertir cotizaciones aprobadas',
-                estadoActual: cotizacion.EstadoID
-            });
-        }
-
-        // ========================================
-        // VALIDAR STOCK DISPONIBLE
-        // ========================================
-        console.log('\n🔍 VALIDANDO STOCK...');
-        for (const detalle of cotizacion.detalles) {
-            const colorID = detalle.colores?.[0]?.ColorID;
-            const tallaID = detalle.tallas?.[0]?.TallaID;
-
-            if (!colorID || !tallaID) {
-                throw new Error('Cotización sin color/talla especificada');
-            }
-
-            const variante = await InventarioProducto.findOne({
-                where: {
-                    ProductoID: detalle.ProductoID,
-                    ColorID: colorID,
-                    TallaID: tallaID
-                }
-            });
-
-            if (!variante || variante.Stock < detalle.Cantidad) {
-                throw new Error(
-                    `Stock insuficiente para ${detalle.producto?.Nombre}. ` +
-                    `Disponible: ${variante?.Stock || 0}, Necesario: ${detalle.Cantidad}`
-                );
-            }
-        }
-
-        // ========================================
-        // CREAR VENTA
-        // ========================================
-        console.log('\n📝 CREANDO VENTA...');
-        const nuevaVenta = await Venta.create({
-            DocumentoID: cotizacion.DocumentoID,
-            FechaVenta: new Date(),
-            Subtotal: cotizacion.ValorTotal,
-            Total: cotizacion.ValorTotal,
-            EstadoID: 8 // PENDIENTE
-        });
-
-        // Crear detalles de venta
-        for (const detalle of cotizacion.detalles) {
-            const tallaID = detalle.tallas?.[0]?.TallaID;
-            const colorID = detalle.colores?.[0]?.ColorID;
-
-            // Calcular precio unitario
-            const precioBase = parseFloat(detalle.producto.PrecioBase) || 0;
-            const precioTalla = parseFloat(detalle.tallas?.[0]?.talla?.Precio) || 0;
-            const precioTela = parseFloat(detalle.insumos?.[0]?.insumo?.PrecioTela) || 0;
-            const costoTecnicas = detalle.tecnicas?.reduce((sum, t) => sum + (parseFloat(t.CostoTecnica) || 0), 0) || 0;
-            const precioUnitario = precioBase + precioTalla + precioTela + costoTecnicas;
-
-            await DetalleVenta.create({
-                VentaID: nuevaVenta.VentaID,
-                ProductoID: detalle.ProductoID,
-                ColorID: colorID,
-                TallaID: tallaID,
-                Cantidad: detalle.Cantidad,
-                PrecioUnitario: precioUnitario
-            });
-
-            // DESCONTAR STOCK
-            await InventarioProducto.decrement('Stock', {
-                by: detalle.Cantidad,
-                where: {
-                    ProductoID: detalle.ProductoID,
-                    ColorID: colorID,
-                    TallaID: tallaID
-                }
-            });
-
-            console.log(`   ✓ Stock descontado: ${detalle.Cantidad} unidades`);
-        }
-
-        // Actualizar estado de cotización a "Convertida" (puedes crear un nuevo estado si quieres)
-        await cotizacion.update({ EstadoID: 3 }); // 3 = Convertida/Procesada
-
-        console.log('='.repeat(60));
-        console.log('CONVERSIÓN EXITOSA');
-        console.log('='.repeat(60) + '\n');
-
-        return res.status(201).json({
-            message: 'Cotización convertida a venta exitosamente',
-            venta: nuevaVenta,
-            cotizacionID: cotizacion.CotizacionID
-        });
-
-    } catch (error) {
-        console.error('Error al convertir cotización:', error);
-        res.status(500).json({
-            message: 'Error al convertir cotización',
-            error: error.message
-        });
-    }
-};
 
 // ============================================
 // MANTENER FUNCIONES ORIGINALES
@@ -989,6 +919,8 @@ exports.getAllCotizaciones = async (req, res) => {
     }
 };
 
+
+
 exports.getCotizacionById = async (req, res) => {
     try {
         const cotizacion = await Cotizacion.findByPk(req.params.id, {
@@ -1032,7 +964,16 @@ exports.getCotizacionById = async (req, res) => {
             return res.status(404).json({ message: 'Cotización no encontrada' });
         }
 
-        res.json(cotizacion);
+        // Enriquecer datos con nombre de producto correcto
+        const cotizacionEnriquecida = {
+            ...cotizacion.toJSON(),
+            detalles: cotizacion.detalles.map(det => ({
+                ...det.toJSON(),
+                nombreProductoDisplay: obtenerNombreProducto(det)
+            }))
+        };
+
+        res.json(cotizacionEnriquecida);
     } catch (error) {
         res.status(500).json({
             message: 'Error al obtener cotización',
@@ -1041,25 +982,92 @@ exports.getCotizacionById = async (req, res) => {
     }
 };
 
+
+// ACTUALIZAR: Función updateCotizacion existente
+// lógica de devolución de stock al cambiar estado
 exports.updateCotizacion = async (req, res) => {
     try {
         const { ValorTotal, EstadoID } = req.body;
-        const cotizacion = await Cotizacion.findByPk(req.params.id);
+        const cotizacionID = req.params.id;
+
+        const cotizacion = await Cotizacion.findByPk(cotizacionID, {
+            include: [
+                {
+                    model: DetalleCotizacion,
+                    as: 'detalles',
+                    include: [
+                        { model: Producto, as: 'producto' },
+                        {
+                            model: CotizacionTalla,
+                            as: 'tallas',
+                            include: [{ model: Talla, as: 'talla' }]
+                        },
+                        {
+                            model: CotizacionColor,
+                            as: 'colores',
+                            include: [{ model: Color, as: 'color' }]
+                        }
+                    ]
+                }
+            ]
+        });
 
         if (!cotizacion) {
             return res.status(404).json({ message: 'Cotización no encontrada' });
         }
 
+        const estadoAnterior = cotizacion.EstadoID;
+        const estadoNuevo = EstadoID ? parseInt(EstadoID) : estadoAnterior;
+
+        console.log('\n' + '='.repeat(60));
+        console.log('CAMBIO DE ESTADO DE COTIZACIÓN');
+        console.log('='.repeat(60));
+        console.log(`Cotización ID: ${cotizacionID}`);
+        console.log(`Estado anterior: ${estadoAnterior}`);
+        console.log(`Estado nuevo: ${estadoNuevo}`);
+
+        // LÓGICA: Si se cancela una cotización aprobada (2 -> 3), DEVOLVER el stock
+        if (estadoAnterior === 2 && estadoNuevo === 3) {
+            console.log('\nDEVOLVIENDO STOCK (cotización aprobada cancelada)...');
+
+            for (const detalle of cotizacion.detalles) {
+                const traePrenda = Boolean(detalle.TraePrenda);
+
+                if (!traePrenda) {
+                    const colorID = detalle.colores?.[0]?.ColorID;
+                    const tallaID = detalle.tallas?.[0]?.TallaID;
+
+                    if (colorID && tallaID) {
+                        await InventarioProducto.increment('Stock', {
+                            by: detalle.Cantidad,
+                            where: {
+                                ProductoID: detalle.ProductoID,
+                                ColorID: colorID,
+                                TallaID: tallaID
+                            }
+                        });
+
+                        console.log(`   ✓ Devuelto ${detalle.Cantidad} unidades de ${detalle.producto?.Nombre}`);
+                    }
+                }
+            }
+        }
+
+        // Actualizar cotización
         await cotizacion.update({
             ValorTotal: ValorTotal !== undefined ? ValorTotal : cotizacion.ValorTotal,
-            EstadoID: EstadoID || cotizacion.EstadoID
+            EstadoID: estadoNuevo
         });
+
+        console.log('='.repeat(60) + '\n');
 
         res.json({
             message: 'Cotización actualizada exitosamente',
-            cotizacion
+            cotizacion,
+            stockDevuelto: estadoAnterior === 2 && estadoNuevo === 3
         });
     } catch (error) {
+        console.error('Error al actualizar cotización:', error);
         res.status(500).json({
             message: 'Error al actualizar cotización',
             error: error.message
@@ -1145,6 +1153,207 @@ const calcularValorTotalCotizacion = async (cotizacionID) => {
         return 0;
     }
 };
+
+
+
+//Obtener cotizaciones por usuario
+exports.getCotizacionesByUsuario = async (req, res) => {
+    try {
+        const { documentoID } = req.params;
+
+        console.log('Buscando cotizaciones para usuario:', documentoID);
+
+        const cotizaciones = await Cotizacion.findAll({
+            where: { DocumentoID: documentoID },
+            include: [
+                { model: Usuario, as: 'usuario' },
+                { model: Estado, as: 'estado' },
+                {
+                    model: DetalleCotizacion,
+                    as: 'detalles',
+                    include: [
+                        { model: Producto, as: 'producto' },
+                        {
+                            model: CotizacionTecnica,
+                            as: 'tecnicas',
+                            include: [
+                                { model: Tecnica, as: 'tecnica' },
+                                { model: Parte, as: 'parte' }
+                            ]
+                        },
+                        {
+                            model: CotizacionTalla,
+                            as: 'tallas',
+                            include: [{ model: Talla, as: 'talla' }]
+                        },
+                        {
+                            model: CotizacionColor,
+                            as: 'colores',
+                            include: [{ model: Color, as: 'color' }]
+                        },
+                        {
+                            model: CotizacionInsumo,
+                            as: 'insumos',
+                            include: [{ model: Insumo, as: 'insumo' }]
+                        }
+                    ]
+                }
+            ],
+            order: [['CotizacionID', 'DESC']]
+        });
+
+        console.log('Cotizaciones encontradas:', cotizaciones.length);
+
+        res.json(cotizaciones);
+    } catch (error) {
+        console.error('Error al obtener cotizaciones del usuario:', error);
+        res.status(500).json({
+            message: 'Error al obtener cotizaciones del usuario',
+            error: error.message
+        });
+    }
+};
+
+
+// NUEVA FUNCIÓN: CANCELAR COTIZACIÓN Y DEVOLVER STOCK
+exports.cancelarCotizacion = async (req, res) => {
+    try {
+        const { cotizacionID } = req.params;
+
+        console.log('\n' + '='.repeat(60));
+        console.log('CANCELANDO COTIZACIÓN Y DEVOLVIENDO STOCK');
+        console.log('CotizacionID:', cotizacionID);
+        console.log('='.repeat(60));
+
+        // Obtener cotización completa con sus detalles
+        const cotizacion = await Cotizacion.findByPk(cotizacionID, {
+            include: [
+                {
+                    model: DetalleCotizacion,
+                    as: 'detalles',
+                    include: [
+                        { model: Producto, as: 'producto' },
+                        {
+                            model: CotizacionTalla,
+                            as: 'tallas',
+                            include: [{ model: Talla, as: 'talla' }]
+                        },
+                        {
+                            model: CotizacionColor,
+                            as: 'colores',
+                            include: [{ model: Color, as: 'color' }]
+                        }
+                    ]
+                },
+                { model: Usuario, as: 'usuario' },
+                { model: Estado, as: 'estado' }
+            ]
+        });
+
+        if (!cotizacion) {
+            console.error('Cotización no encontrada');
+            return res.status(404).json({
+                message: 'Cotización no encontrada',
+                cotizacionID
+            });
+        }
+
+        console.log('✓ Cotización encontrada');
+        console.log('   Estado actual:', cotizacion.estado?.Nombre);
+        console.log('   EstadoID:', cotizacion.EstadoID);
+
+        // Verificar si la cotización ya fue procesada como venta (EstadoID 14)
+        if (cotizacion.EstadoID === 14) {
+            return res.status(400).json({
+                message: 'No se puede cancelar una cotización que ya fue convertida a venta',
+                estadoActual: 'Procesada'
+            });
+        }
+
+        // DEVOLVER STOCK SOLO SI LA COTIZACIÓN SE CONVIRTIÓ EN VENTA
+        // (Es decir, si el estado es 14 = Procesada, significaba que se descontó stock)
+        // Pero como la estamos cancelando, vamos a verificar si tiene una venta asociada
+
+        // Para cotizaciones que nunca se convirtieron en venta (estados 1, 2, 3),
+        // NO hay stock que devolver porque nunca se descontó
+
+        console.log('\nANALIZANDO SI HAY STOCK PARA DEVOLVER...');
+
+        // Solo devolvemos stock si la cotización estaba aprobada (estado 2)
+        // Y el cliente NO traía prenda propia
+        let stockDevuelto = false;
+
+        if (cotizacion.EstadoID === 2) { // Aprobada
+            for (const detalle of cotizacion.detalles) {
+                const traePrenda = Boolean(detalle.TraePrenda);
+
+                if (!traePrenda) {
+                    const colorID = detalle.colores?.[0]?.ColorID;
+                    const tallaID = detalle.tallas?.[0]?.TallaID;
+
+                    if (colorID && tallaID) {
+                        console.log(`\n   📦 Devolviendo stock para:`);
+                        console.log(`      Producto: ${detalle.producto?.Nombre}`);
+                        console.log(`      Cantidad: ${detalle.Cantidad}`);
+
+                        await InventarioProducto.increment('Stock', {
+                            by: detalle.Cantidad,
+                            where: {
+                                ProductoID: detalle.ProductoID,
+                                ColorID: colorID,
+                                TallaID: tallaID
+                            }
+                        });
+
+                        stockDevuelto = true;
+                        console.log(`      ✓ Stock devuelto exitosamente`);
+                    }
+                } else {
+                    console.log(`\n   ${detalle.producto?.Nombre || 'Producto'}: Es prenda propia - No requiere devolución de stock`);
+                }
+            }
+        } else {
+            console.log('   Cotización no aprobada - No hay stock que devolver');
+        }
+
+        // Actualizar estado a "Cancelada" (EstadoID 3)
+        console.log('\nACTUALIZANDO ESTADO DE COTIZACIÓN...');
+        await cotizacion.update({ EstadoID: 3 }); // 3 = Cancelada
+        console.log('✓ Estado actualizado a CANCELADA (ID: 3)\n');
+
+        console.log('='.repeat(60));
+        console.log('COTIZACIÓN CANCELADA EXITOSAMENTE');
+        console.log('='.repeat(60) + '\n');
+
+        return res.status(200).json({
+            message: 'Cotización cancelada exitosamente',
+            cotizacionID: cotizacion.CotizacionID,
+            estadoAnterior: cotizacion.estado?.Nombre,
+            estadoNuevo: 'Cancelada',
+            stockDevuelto: stockDevuelto,
+            detallesCancelados: cotizacion.detalles.map(d => ({
+                producto: d.producto?.Nombre,
+                cantidad: d.Cantidad,
+                traePrenda: d.TraePrenda
+            }))
+        });
+
+    } catch (error) {
+        console.error('\n' + '='.repeat(60));
+        console.error('ERROR AL CANCELAR COTIZACIÓN');
+        console.error('='.repeat(60));
+        console.error('Mensaje:', error.message);
+        console.error('Stack:', error.stack);
+        console.error('='.repeat(60) + '\n');
+
+        res.status(500).json({
+            message: 'Error al cancelar cotización',
+            error: error.message,
+            detalles: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+};
+
 
 exports.calcularValorTotalCotizacion = calcularValorTotalCotizacion;
 module.exports.crearVentaDirecta = crearVentaDirecta;

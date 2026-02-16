@@ -130,11 +130,13 @@ exports.createCompra = async (req, res) => {
 
     console.log("Proveedor validado correctamente:", { proveedorRef, proveedorNit });
 
-    // ✅ Crear la compra con AMBOS campos
+    // Crear la compra con AMBOS campos
     const nuevaCompra = await Compra.create({
       ProveedorID: proveedorNit,
       ProveedorRefId: proveedorRef,
-      FechaCompra: req.body.FechaCompra || new Date()
+      FechaCompra: req.body.FechaCompra
+        ? new Date(req.body.FechaCompra + "T12:00:00")
+        : new Date()
     });
 
     console.log("Compra creada exitosamente con ID:", nuevaCompra.CompraID);
@@ -231,11 +233,14 @@ exports.updateCompra = async (req, res) => {
       proveedorNit = proveedor.Nit;
     }
 
+
     // Actualizar la compra
     await compra.update({
-      ProveedorID: proveedorNit,
-      ProveedorRefId: proveedorRef,
-      FechaCompra: FechaCompra || compra.FechaCompra
+      ProveedorID: proveedorNit || compra.ProveedorID,
+      ProveedorRefId: proveedorRef || compra.ProveedorRefId,
+      FechaCompra: FechaCompra
+        ? new Date(FechaCompra + "T12:00:00")
+        : compra.FechaCompra
     });
 
     // Eliminar detalles anteriores

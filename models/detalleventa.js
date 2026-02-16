@@ -38,7 +38,7 @@ module.exports = (sequelize, DataTypes) => {
         },
         ProductoID: {
             type: DataTypes.INTEGER,
-            allowNull: false
+            allowNull: true
         },
         ColorID: {
             type: DataTypes.INTEGER

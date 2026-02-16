@@ -5,25 +5,25 @@ module.exports = (sequelize, DataTypes) => {
   class Venta extends Model {
     static associate(models) {
       // Una venta pertenece a un usuario
-      Venta.belongsTo(models.Usuario, { 
+      Venta.belongsTo(models.Usuario, {
         foreignKey: 'DocumentoID',
         as: 'usuario'
       });
-      
+
       // Una venta tiene muchos detalles
-      Venta.hasMany(models.DetalleVenta, { 
+      Venta.hasMany(models.DetalleVenta, {
         foreignKey: 'VentaID',
         as: 'detalles'
       });
-      
+
       // Una venta pertenece a un estado
-      Venta.belongsTo(models.Estado, { 
+      Venta.belongsTo(models.Estado, {
         foreignKey: 'EstadoID',
         as: 'estado'
       });
     }
   }
-  
+
   Venta.init({
     VentaID: {
       type: DataTypes.INTEGER,
@@ -56,6 +56,34 @@ module.exports = (sequelize, DataTypes) => {
         model: 'Estados',
         key: 'EstadoID'
       }
+    },
+    // CAMPOS DE MÉTODO DE PAGO - TODOS OPCIONALES
+    MetodoPago: {
+      type: DataTypes.STRING(50),
+      allowNull: true, 
+      validate: {
+        isIn: [['transferencia', 'contraentrega']]
+      }
+    },
+    ComprobanteTransferencia: {
+      type: DataTypes.TEXT,
+      allowNull: true 
+    },
+    FechaTransferencia: {
+      type: DataTypes.DATE,
+      allowNull: true 
+    },
+    NombreReceptor: {
+      type: DataTypes.STRING(100),
+      allowNull: true 
+    },
+    TelefonoEntrega: {
+      type: DataTypes.STRING(20),
+      allowNull: true 
+    },
+    DireccionEntrega: {
+      type: DataTypes.STRING(255),
+      allowNull: true 
     }
   }, {
     sequelize,
@@ -63,6 +91,6 @@ module.exports = (sequelize, DataTypes) => {
     tableName: 'ventas',
     timestamps: false
   });
-  
+
   return Venta;
 };
