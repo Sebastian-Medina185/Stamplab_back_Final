@@ -162,7 +162,7 @@ exports.deleteProveedor = async (req, res) => {
 
     res.json({ 
       message: 'Proveedor eliminado exitosamente',
-      accion: 'eliminado' // ✅ Indicador para el frontend
+      accion: 'eliminado' // Indicador para el frontend
     });
   } catch (error) {
     res.status(500).json({

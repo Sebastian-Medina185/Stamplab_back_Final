@@ -2,6 +2,8 @@ const {
     Venta,
     Usuario,
     DetalleVenta,
+    DetalleCompra,
+    Compra,
     Producto,
     Tecnica,
     Insumo,
@@ -244,7 +246,7 @@ exports.updateEstadoVenta = async (req, res) => {
 
         // LÓGICA: Si se cancela una venta pendiente, DEVOLVER el stock
         // EstadoID 13 = Cancelada 
-        if (estadoAnterior === 8 && estadoNuevo === 13) {
+        if (estadoAnterior === 8 && estadoNuevo === 12) {
             console.log('\nDEVOLVIENDO STOCK (venta cancelada)...');
 
             for (const detalle of venta.detalles) {
@@ -269,7 +271,7 @@ exports.updateEstadoVenta = async (req, res) => {
         res.json({
             message: 'Estado actualizado exitosamente',
             venta,
-            stockDevuelto: estadoAnterior === 8 && estadoNuevo === 10
+            stockDevuelto: estadoAnterior === 8 && estadoNuevo === 12
         });
 
     } catch (error) {
@@ -398,30 +400,30 @@ exports.deleteVenta = async (req, res) => {
 // Dashboard (sin cambios)
 exports.getDashboardData = async (req, res) => {
     try {
-        const { mes, tecnicaId, productoId } = req.query;
+        const { mes, productoId } = req.query;
+        // NOTA: el filtro tecnicaId se elimina porque DetalleVenta
+        // no tiene asociación con Tecnica en tu modelo actual.
 
+        // ── Construir WHERE para Venta (filtro de mes) ──
         let whereVenta = {};
-        let whereDetalle = {};
-
         if (mes) {
             const mesNum = parseInt(mes);
-            whereVenta.FechaVenta = {
+            whereVenta = {
                 [Op.and]: [
-                    sequelize.where(sequelize.fn('MONTH', sequelize.col('FechaVenta')), mesNum),
-                    sequelize.where(sequelize.fn('YEAR', sequelize.col('FechaVenta')), new Date().getFullYear())
+                    sequelize.where(sequelize.fn('MONTH', sequelize.col('venta.FechaVenta')), mesNum),
+                    sequelize.where(sequelize.fn('YEAR', sequelize.col('venta.FechaVenta')), new Date().getFullYear())
                 ]
             };
         }
 
-        if (tecnicaId) {
-            whereDetalle.TecnicaID = parseInt(tecnicaId);
-        }
-
+        // ── Construir WHERE para DetalleVenta (filtro de producto) ──
+        let whereDetalle = {};
         if (productoId) {
             whereDetalle.ProductoID = parseInt(productoId);
         }
 
-        const ventasPorTecnicas = await DetalleVenta.findAll({
+        // ── 1. Ventas por mes (agrupado por mes) ──
+        const ventasPorMes = await DetalleVenta.findAll({
             attributes: [
                 [sequelize.fn('MONTH', sequelize.col('venta.FechaVenta')), 'mes'],
                 [sequelize.fn('COUNT', sequelize.col('DetalleVentaID')), 'ventas']
@@ -432,11 +434,6 @@ exports.getDashboardData = async (req, res) => {
                     as: 'venta',
                     attributes: [],
                     where: whereVenta
-                },
-                {
-                    model: Tecnica,
-                    as: 'tecnica',
-                    attributes: []
                 }
             ],
             where: whereDetalle,
@@ -445,10 +442,11 @@ exports.getDashboardData = async (req, res) => {
             raw: true
         });
 
+        // ── 2. Productos más vendidos (por producto, top 10) ──
         const productosMasVendidos = await DetalleVenta.findAll({
             attributes: [
-                [sequelize.fn('MONTH', sequelize.col('venta.FechaVenta')), 'mes'],
-                [sequelize.fn('SUM', sequelize.col('Cantidad')), 'cantidad']
+                'ProductoID',
+                [sequelize.fn('SUM', sequelize.col('DetalleVenta.Cantidad')), 'cantidad']
             ],
             include: [
                 {
@@ -460,72 +458,68 @@ exports.getDashboardData = async (req, res) => {
                 {
                     model: Producto,
                     as: 'producto',
-                    attributes: []
+                    attributes: ['Nombre']
                 }
             ],
             where: whereDetalle,
-            group: [sequelize.fn('MONTH', sequelize.col('venta.FechaVenta'))],
-            order: [[sequelize.fn('MONTH', sequelize.col('venta.FechaVenta')), 'ASC']],
+            group: ['DetalleVenta.ProductoID', 'producto.ProductoID', 'producto.Nombre'],
+            order: [[sequelize.fn('SUM', sequelize.col('DetalleVenta.Cantidad')), 'DESC']],
+            limit: 10,
             raw: true
         });
 
-        const insumosUtilizados = await DetalleVenta.findAll({
+        // ── 3. Insumos más utilizados: viene de DetalleCompra (tipo 'insumo') ──
+        // DetalleVenta no tiene relación con insumos directamente,
+        // así que consultamos DetalleCompra agrupado por mes.
+        const insumosUtilizados = await DetalleCompra.findAll({
             attributes: [
-                [sequelize.fn('MONTH', sequelize.col('venta.FechaVenta')), 'mes'],
-                [sequelize.fn('COUNT', sequelize.col('DetalleVentaID')), 'cantidad']
+                [sequelize.fn('MONTH', sequelize.col('compra.FechaCompra')), 'mes'],
+                [sequelize.fn('SUM', sequelize.col('DetalleCompra.Cantidad')), 'cantidad']
             ],
             include: [
                 {
-                    model: Venta,
-                    as: 'venta',
+                    model: Compra,
+                    as: 'compra',
                     attributes: [],
-                    where: whereVenta
-                },
-                {
-                    model: Producto,
-                    as: 'producto',
-                    attributes: [],
-                    include: [
-                        {
-                            model: InventarioProducto,
-                            as: 'inventario',
-                            attributes: [],
-                            include: [
-                                {
-                                    model: Insumo,
-                                    as: 'tela',
-                                    attributes: [],
-                                    where: { Tipo: 'Tela' },
-                                    required: false
-                                }
-                            ]
-                        }
-                    ]
+                    where: mes ? {
+                        [Op.and]: [
+                            sequelize.where(sequelize.fn('MONTH', sequelize.col('compra.FechaCompra')), parseInt(mes)),
+                            sequelize.where(sequelize.fn('YEAR', sequelize.col('compra.FechaCompra')), new Date().getFullYear())
+                        ]
+                    } : {}
                 }
             ],
-            where: whereDetalle,
-            group: [sequelize.fn('MONTH', sequelize.col('venta.FechaVenta'))],
-            order: [[sequelize.fn('MONTH', sequelize.col('venta.FechaVenta')), 'ASC']],
+            where: { TipoSeleccion: 'insumo' },
+            group: [sequelize.fn('MONTH', sequelize.col('compra.FechaCompra'))],
+            order: [[sequelize.fn('MONTH', sequelize.col('compra.FechaCompra')), 'ASC']],
             raw: true
         });
 
+        // ── Formatear respuestas ──
         const mesesNombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-        const formatearDatos = (datos) => {
-            return datos.map(item => ({
-                mes: mesesNombres[item.mes - 1],
-                ventas: parseInt(item.ventas) || 0,
-                cantidad: parseInt(item.cantidad) || 0
-            }));
-        };
+        const ventasFormateadas = ventasPorMes.map(item => ({
+            mes: mesesNombres[item.mes - 1],
+            ventas: parseInt(item.ventas) || 0
+        }));
+
+        const productosFormateados = productosMasVendidos.map(item => ({
+            mes: item['producto.Nombre'] || `Producto ${item.ProductoID}`,
+            cantidad: parseInt(item.cantidad) || 0
+        }));
+
+        const insumosFormateados = insumosUtilizados.map(item => ({
+            mes: mesesNombres[item.mes - 1],
+            cantidad: parseInt(item.cantidad) || 0
+        }));
 
         res.json({
             estado: true,
             mensaje: 'Datos del dashboard obtenidos exitosamente',
             datos: {
-                ventasPorTecnicas: formatearDatos(ventasPorTecnicas),
-                productosMasVendidos: formatearDatos(productosMasVendidos),
-                insumosUtilizados: formatearDatos(insumosUtilizados)
+                ventasPorTecnicas: ventasFormateadas,   // ahora son ventas por mes
+                productosMasVendidos: productosFormateados,
+                insumosUtilizados: insumosFormateados
             }
         });
 

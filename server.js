@@ -16,7 +16,15 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+const path = require('path');
+const fs = require('fs');
 
+// Servir imágenes de diseños estáticamente
+app.use('/uploads/disenos', express.static(path.join(__dirname, 'uploads', 'disenos')));
+
+// Crear carpeta si no existe
+const uploadDir = path.join(__dirname, 'uploads', 'disenos');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 
 // Middleware para logging
@@ -65,6 +73,7 @@ app.get('/', (req, res) => {
             cotizacioncolores: '/api/cotizacioncolores',
             cotizacioninsumos: '/api/cotizacioninsumos',
 
+
             // Ventas
             ventas: '/api/ventas',
             detalleventas: '/api/detalleventas',
@@ -107,6 +116,7 @@ const cotizaciontecnicasRoutes = require('./routes/cotizaciontecnicas');
 const cotizaciontallasRoutes = require('./routes/cotizaciontallas');
 const cotizacioncoloresRoutes = require('./routes/cotizacioncolores');
 const cotizacioninsumosRoutes = require('./routes/cotizacioninsumos');
+const cotizacionPdfController = require('./controllers/cotizacionPdfController');
 
 // Ventas
 const ventasRoutes = require('./routes/ventas');
@@ -147,6 +157,9 @@ app.use('/api/cotizaciontecnicas', cotizaciontecnicasRoutes);
 app.use('/api/cotizaciontallas', cotizaciontallasRoutes);
 app.use('/api/cotizacioncolores', cotizacioncoloresRoutes);
 app.use('/api/cotizacioninsumos', cotizacioninsumosRoutes);
+
+// Agrega esta línea después del bloque de cotizaciones
+app.get('/api/cotizaciones/:cotizacionID/pdf', cotizacionPdfController.descargarPdfCotizacion);
 
 // Ventas
 app.use('/api/ventas', ventasRoutes);

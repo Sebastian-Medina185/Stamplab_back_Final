@@ -1,177 +1,228 @@
-const { Compra, Proveedor, DetalleCompra, Insumo } = require('../models');
+const { Compra, Proveedor, DetalleCompra, Insumo, Producto, InventarioProducto, Color, Talla } = require('../models');
 
 console.log("Asociaciones de Compra:", Object.keys(Compra.associations));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INCLUDES reutilizables
+// ─────────────────────────────────────────────────────────────────────────────
+const includeDetalles = [
+  { model: Insumo, as: 'insumo', required: false },
+  {
+    model: Producto,
+    as: 'producto',
+    required: false,
+    attributes: ['ProductoID', 'Nombre', 'Descripcion', 'PrecioBase']
+  },
+  {
+    model: InventarioProducto,
+    as: 'variante',
+    required: false,
+    include: [
+      { model: Color, as: 'color', attributes: ['ColorID', 'Nombre'] },
+      { model: Talla, as: 'talla', attributes: ['TallaID', 'Nombre', 'Precio'] },
+      { model: Insumo, as: 'tela', attributes: ['InsumoID', 'Nombre', 'PrecioTela'], required: false }
+    ]
+  }
+];
+
+const includeCompra = [
+  { model: Proveedor, as: 'proveedor' },
+  { model: DetalleCompra, as: 'detalles', include: includeDetalles }
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS de stock
+// ─────────────────────────────────────────────────────────────────────────────
+async function incrementarStockDetalle(detalle) {
+  if (detalle.TipoSeleccion === 'insumo') {
+    await Insumo.increment('Stock', { by: detalle.Cantidad, where: { InsumoID: detalle.InsumoID } });
+  } else {
+    await InventarioProducto.increment('Stock', { by: detalle.Cantidad, where: { InventarioID: detalle.InventarioID } });
+  }
+}
+
+async function decrementarStockDetalle(detalle) {
+  if (detalle.TipoSeleccion === 'insumo') {
+    await Insumo.decrement('Stock', { by: detalle.Cantidad, where: { InsumoID: detalle.InsumoID } });
+  } else {
+    await InventarioProducto.decrement('Stock', { by: detalle.Cantidad, where: { InventarioID: detalle.InventarioID } });
+  }
+}
+
+/**
+ * Busca o crea una variante en InventarioProducto.
+ * @returns {number} InventarioID
+ */
+async function resolverVariante({ ProductoID, ColorID, TallaID, TelaID }) {
+  const producto = await Producto.findByPk(ProductoID);
+  if (!producto) throw new Error(`Producto con ID ${ProductoID} no encontrado`);
+
+  const whereVariante = {
+    ProductoID: parseInt(ProductoID),
+    ColorID: parseInt(ColorID),
+    TallaID: parseInt(TallaID),
+    TelaID: TelaID ? parseInt(TelaID) : null
+  };
+
+  let variante = await InventarioProducto.findOne({ where: whereVariante });
+
+  if (!variante) {
+    // Crear la variante con stock 0 (se incrementará luego)
+    variante = await InventarioProducto.create({ ...whereVariante, Stock: 0, Estado: 1 });
+  }
+
+  return variante.InventarioID;
+}
+
+/**
+ * Prepara un array de detalles listos para bulkCreate, resolviendo variantes si aplica.
+ * @param {Array} detalles - array del body
+ * @param {number} CompraID
+ * @returns {Array}
+ */
+async function prepararDetalles(detalles, CompraID) {
+  const resultado = [];
+
+  for (const detalle of detalles) {
+    const tipo = detalle.TipoSeleccion || 'insumo';
+
+    if (tipo === 'insumo') {
+      if (!detalle.InsumoID) throw new Error('Cada detalle de tipo insumo debe tener InsumoID');
+      resultado.push({
+        CompraID,
+        TipoSeleccion: 'insumo',
+        InsumoID: detalle.InsumoID,
+        ProductoID: null,
+        InventarioID: null,
+        Cantidad: detalle.Cantidad,
+        PrecioUnitario: detalle.PrecioUnitario || 0,
+        PrecioVenta: detalle.PrecioVenta || null
+      });
+
+    } else if (tipo === 'producto') {
+      if (!detalle.ProductoID) throw new Error('Cada detalle de tipo producto debe tener ProductoID');
+      if (!detalle.ColorID || !detalle.TallaID) throw new Error('ColorID y TallaID son obligatorios para detalles de tipo producto');
+
+      const inventarioID = await resolverVariante({
+        ProductoID: detalle.ProductoID,
+        ColorID: detalle.ColorID,
+        TallaID: detalle.TallaID,
+        TelaID: detalle.TelaID || null
+      });
+
+      resultado.push({
+        CompraID,
+        TipoSeleccion: 'producto',
+        InsumoID: null,
+        ProductoID: detalle.ProductoID,
+        InventarioID: inventarioID,
+        Cantidad: detalle.Cantidad,
+        PrecioUnitario: detalle.PrecioUnitario || 0,
+        PrecioVenta: detalle.PrecioVenta || null
+      });
+
+    } else {
+      throw new Error(`TipoSeleccion inválido: ${tipo}. Debe ser "insumo" o "producto"`);
+    }
+  }
+
+  return resultado;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VALIDACIONES comunes de detalles
+// ─────────────────────────────────────────────────────────────────────────────
+function validarDetalles(detalles) {
+  if (!detalles || detalles.length === 0) {
+    return 'Debe agregar al menos un insumo o producto';
+  }
+  for (const detalle of detalles) {
+    if (!detalle.Cantidad || detalle.Cantidad <= 0) {
+      return 'Las cantidades deben ser mayores a 0';
+    }
+    const tipo = detalle.TipoSeleccion || 'insumo';
+    if (tipo === 'insumo' && !detalle.InsumoID) return 'Cada detalle de tipo insumo debe tener InsumoID';
+    if (tipo === 'producto' && !detalle.ProductoID) return 'Cada detalle de tipo producto debe tener ProductoID';
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRUD COMPRAS
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Obtener todas las compras
 exports.getAllCompras = async (req, res) => {
   try {
-    const compras = await Compra.findAll({
-      include: [
-        {
-          model: Proveedor,
-          as: 'proveedor'
-        },
-        {
-          model: DetalleCompra,
-          as: 'detalles',
-          include: [
-            {
-              model: Insumo,
-              as: 'insumo'
-            }
-          ]
-        }
-      ]
-    });
+    const compras = await Compra.findAll({ include: includeCompra });
     res.json(compras);
   } catch (error) {
-    res.status(500).json({
-      message: 'Error al obtener compras',
-      error: error.message
-    });
+    res.status(500).json({ message: 'Error al obtener compras', error: error.message });
   }
 };
 
 // Obtener una compra por ID
 exports.getCompraById = async (req, res) => {
   try {
-    const compra = await Compra.findByPk(req.params.id, {
-      include: [
-        {
-          model: Proveedor,
-          as: 'proveedor'
-        },
-        {
-          model: DetalleCompra,
-          as: 'detalles',
-          include: [
-            {
-              model: Insumo,
-              as: 'insumo'
-            }
-          ]
-        }
-      ]
-    });
+    const compra = await Compra.findByPk(req.params.id, { include: includeCompra });
 
-    if (!compra) {
-      return res.status(404).json({ message: 'Compra no encontrada' });
-    }
+    if (!compra) return res.status(404).json({ message: 'Compra no encontrada' });
 
     res.json(compra);
   } catch (error) {
-    res.status(500).json({
-      message: 'Error al obtener compra',
-      error: error.message
-    });
+    res.status(500).json({ message: 'Error al obtener compra', error: error.message });
   }
 };
 
-// Crear una nueva compra con detalles
+// Crear una nueva compra con detalles (insumos y/o productos)
 exports.createCompra = async (req, res) => {
   try {
     const { ProveedorID, ProveedorRefId, detalles } = req.body;
 
-    // Validar que haya detalles
-    if (!detalles || detalles.length === 0) {
-      return res.status(400).json({ message: 'Debe agregar al menos un insumo' });
-    }
+    // Validar detalles
+    const errorDetalles = validarDetalles(detalles);
+    if (errorDetalles) return res.status(400).json({ message: errorDetalles });
 
-    // ✅ Validar cantidades
-    for (const detalle of detalles) {
-      if (!detalle.InsumoID || !detalle.Cantidad) {
-        return res.status(400).json({
-          message: 'Cada detalle debe tener InsumoID y Cantidad'
-        });
-      }
-      if (detalle.Cantidad <= 0) {
-        return res.status(400).json({ message: 'Las cantidades deben ser mayores a 0' });
-      }
-    }
-
-    // ✅ Resolver tanto ProveedorRefId como el Nit (ProveedorID)
+    // ── Resolver proveedor ──
     let proveedorRef = ProveedorRefId || null;
     let proveedorNit = ProveedorID || null;
 
-    console.log("Antes de validar proveedor:", { proveedorRef, proveedorNit });
-
-    // Si solo tenemos ProveedorRefId, buscar el proveedor completo
     if (proveedorRef && !proveedorNit) {
-      console.log("Buscando proveedor por ID:", proveedorRef);
       const proveedor = await Proveedor.findByPk(proveedorRef);
-
-      if (!proveedor) {
-        console.error("Proveedor no encontrado con ID:", proveedorRef);
-        return res.status(404).json({
-          message: 'Proveedor no encontrado',
-          proveedorBuscado: proveedorRef
-        });
-      }
-
+      if (!proveedor) return res.status(404).json({ message: 'Proveedor no encontrado', proveedorBuscado: proveedorRef });
       proveedorNit = proveedor.Nit;
-      console.log("Proveedor encontrado:", { id: proveedor.id, Nit: proveedor.Nit, Nombre: proveedor.Nombre });
     }
 
-    // Si tenemos Nit pero no el ID, buscarlo
     if (!proveedorRef && proveedorNit) {
       const proveedor = await Proveedor.findOne({ where: { Nit: proveedorNit } });
-      if (!proveedor) {
-        return res.status(404).json({ message: 'Proveedor (Nit) no existe' });
-      }
-
+      if (!proveedor) return res.status(404).json({ message: 'Proveedor (Nit) no existe' });
       proveedorRef = proveedor.id;
-      console.log("Proveedor encontrado:", { id: proveedor.id, Nit: proveedor.Nit, Nombre: proveedor.Nombre });
     }
 
-    // Validar que tengamos ambos
     if (!proveedorRef || !proveedorNit) {
       return res.status(400).json({ message: 'Se requiere un proveedor válido' });
     }
 
-    console.log("Proveedor validado correctamente:", { proveedorRef, proveedorNit });
-
-    // Crear la compra con AMBOS campos
+    // ── Crear la compra ──
     const nuevaCompra = await Compra.create({
       ProveedorID: proveedorNit,
       ProveedorRefId: proveedorRef,
       FechaCompra: req.body.FechaCompra
-        ? new Date(req.body.FechaCompra + "T12:00:00")
+        ? new Date(req.body.FechaCompra + 'T12:00:00')
         : new Date()
     });
 
-    console.log("Compra creada exitosamente con ID:", nuevaCompra.CompraID);
+    // ── Preparar y crear detalles (resuelve variantes automáticamente) ──
+    const detallesPreparados = await prepararDetalles(detalles, nuevaCompra.CompraID);
+    await DetalleCompra.bulkCreate(detallesPreparados);
 
-    // Crear los detalles
-    const detallesConCompraID = detalles.map(detalle => ({
-      CompraID: nuevaCompra.CompraID,
-      InsumoID: detalle.InsumoID,
-      Cantidad: detalle.Cantidad,
-      PrecioUnitario: detalle.PrecioUnitario || 0
-    }));
+    // ── Incrementar stock para cada detalle ──
+    for (const detalle of detallesPreparados) {
+      await incrementarStockDetalle(detalle);
+    }
 
-    await DetalleCompra.bulkCreate(detallesConCompraID);
-
-    console.log("Detalles creados:", detallesConCompraID.length);
-
-    // Retornar la compra completa
-    const compraCompleta = await Compra.findByPk(nuevaCompra.CompraID, {
-      include: [
-        {
-          model: Proveedor,
-          as: 'proveedor'
-        },
-        {
-          model: DetalleCompra,
-          as: 'detalles',
-          include: [
-            {
-              model: Insumo,
-              as: 'insumo'
-            }
-          ]
-        }
-      ]
-    });
+    // ── Retornar compra completa ──
+    const compraCompleta = await Compra.findByPk(nuevaCompra.CompraID, { include: includeCompra });
 
     res.status(201).json({
       message: 'Compra creada exitosamente',
@@ -179,13 +230,8 @@ exports.createCompra = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error al crear compra:", error);
-    console.error("Stack trace:", error.stack);
-    res.status(500).json({
-      message: 'Error al crear compra',
-      error: error.message,
-      details: error.stack
-    });
+    console.error('Error al crear compra:', error);
+    res.status(500).json({ message: 'Error al crear compra', error: error.message, details: error.stack });
   }
 };
 
@@ -195,100 +241,55 @@ exports.updateCompra = async (req, res) => {
     const { ProveedorRefId, FechaCompra, detalles } = req.body;
 
     const compra = await Compra.findByPk(req.params.id);
+    if (!compra) return res.status(404).json({ message: 'Compra no encontrada' });
 
-    if (!compra) {
-      return res.status(404).json({ message: 'Compra no encontrada' });
-    }
+    const errorDetalles = validarDetalles(detalles);
+    if (errorDetalles) return res.status(400).json({ message: errorDetalles });
 
-    // Validar que haya detalles
-    if (!detalles || detalles.length === 0) {
-      return res.status(400).json({ message: 'Debe agregar al menos un insumo' });
-    }
+    // ── Resolver nuevo proveedor si viene ──
+    let proveedorNit = compra.ProveedorID;
+    let proveedorRef = compra.ProveedorRefId;
 
-    // Validar cantidades
-    for (const detalle of detalles) {
-      if (!detalle.InsumoID || !detalle.Cantidad) {
-        return res.status(400).json({
-          message: 'Cada detalle debe tener InsumoID y Cantidad'
-        });
-      }
-      if (detalle.Cantidad <= 0) {
-        return res.status(400).json({ message: 'Las cantidades deben ser mayores a 0' });
-      }
-    }
-
-    // Resolver el proveedor
-    let proveedorRef = ProveedorRefId;
-    let proveedorNit = null;
-
-    if (proveedorRef) {
-      const proveedor = await Proveedor.findByPk(proveedorRef);
-
-      if (!proveedor) {
-        return res.status(404).json({
-          message: 'Proveedor no encontrado'
-        });
-      }
-
+    if (ProveedorRefId) {
+      const proveedor = await Proveedor.findByPk(ProveedorRefId);
+      if (!proveedor) return res.status(404).json({ message: 'Proveedor no encontrado' });
       proveedorNit = proveedor.Nit;
+      proveedorRef = ProveedorRefId;
     }
 
-
-    // Actualizar la compra
     await compra.update({
-      ProveedorID: proveedorNit || compra.ProveedorID,
-      ProveedorRefId: proveedorRef || compra.ProveedorRefId,
-      FechaCompra: FechaCompra
-        ? new Date(FechaCompra + "T12:00:00")
-        : compra.FechaCompra
+      ProveedorID: proveedorNit,
+      ProveedorRefId: proveedorRef,
+      FechaCompra: FechaCompra ? new Date(FechaCompra + 'T12:00:00') : compra.FechaCompra
     });
 
-    // Eliminar detalles anteriores
-    await DetalleCompra.destroy({
-      where: { CompraID: req.params.id }
-    });
+    // ── Revertir stock de los detalles anteriores ──
+    const detallesAnteriores = await DetalleCompra.findAll({ where: { CompraID: req.params.id } });
+    for (const detalleAnterior of detallesAnteriores) {
+      await decrementarStockDetalle(detalleAnterior);
+    }
+    await DetalleCompra.destroy({ where: { CompraID: req.params.id } });
 
-    // Crear nuevos detalles
-    const detallesConCompraID = detalles.map(detalle => ({
-      CompraID: compra.CompraID,
-      InsumoID: detalle.InsumoID,
-      Cantidad: detalle.Cantidad,
-      PrecioUnitario: detalle.PrecioUnitario || 0
-    }));
+    // ── Crear nuevos detalles ──
+    const detallesPreparados = await prepararDetalles(detalles, compra.CompraID);
+    await DetalleCompra.bulkCreate(detallesPreparados);
 
-    await DetalleCompra.bulkCreate(detallesConCompraID);
+    // ── Incrementar stock con los nuevos detalles ──
+    for (const detalle of detallesPreparados) {
+      await incrementarStockDetalle(detalle);
+    }
 
-    // Retornar la compra actualizada
-    const compraActualizada = await Compra.findByPk(compra.CompraID, {
-      include: [
-        {
-          model: Proveedor,
-          as: 'proveedor'
-        },
-        {
-          model: DetalleCompra,
-          as: 'detalles',
-          include: [
-            {
-              model: Insumo,
-              as: 'insumo'
-            }
-          ]
-        }
-      ]
-    });
+    const compraActualizada = await Compra.findByPk(compra.CompraID, { include: includeCompra });
 
     res.json({
+      estado: true,
       message: 'Compra actualizada exitosamente',
       compra: compraActualizada
     });
 
   } catch (error) {
-    console.error("Error al actualizar compra:", error);
-    res.status(500).json({
-      message: 'Error al actualizar compra',
-      error: error.message
-    });
+    console.error('Error al actualizar compra:', error);
+    res.status(500).json({ message: 'Error al actualizar compra', error: error.message });
   }
 };
 
@@ -296,24 +297,20 @@ exports.updateCompra = async (req, res) => {
 exports.deleteCompra = async (req, res) => {
   try {
     const compra = await Compra.findByPk(req.params.id);
+    if (!compra) return res.status(404).json({ message: 'Compra no encontrada' });
 
-    if (!compra) {
-      return res.status(404).json({ message: 'Compra no encontrada' });
+    // ── Revertir stock antes de eliminar ──
+    const detalles = await DetalleCompra.findAll({ where: { CompraID: req.params.id } });
+    for (const detalle of detalles) {
+      await decrementarStockDetalle(detalle);
     }
 
-    // Eliminar primero los detalles
-    await DetalleCompra.destroy({
-      where: { CompraID: req.params.id }
-    });
-
-    // Luego eliminar la compra
+    await DetalleCompra.destroy({ where: { CompraID: req.params.id } });
     await compra.destroy();
 
-    res.json({ message: 'Compra eliminada exitosamente' });
+    res.json({ estado: true, message: 'Compra eliminada exitosamente' });
+
   } catch (error) {
-    res.status(500).json({
-      message: 'Error al eliminar compra',
-      error: error.message
-    });
+    res.status(500).json({ message: 'Error al eliminar compra', error: error.message });
   }
 };
