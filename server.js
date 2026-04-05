@@ -11,9 +11,9 @@ const PORT = process.env.PORT || 3000;
 // ==================== MIDDLEWARES ====================
 // Permitir TODAS las peticiones en desarrollo
 app.use(cors({
-    origin: '*',
-    credentials: true
+    origin: 'https://stamp-lab-proyecto.vercel.app'
 }));
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 const path = require('path');
