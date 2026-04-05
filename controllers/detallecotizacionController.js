@@ -20,26 +20,26 @@ exports.getAllDetalleCotizaciones = async (req, rpes) => {
             include: [
                 { model: Cotizacion, as: 'cotizacion' },
                 { model: Producto, as: 'producto' },
-                { 
-                    model: CotizacionTecnica, 
+                {
+                    model: CotizacionTecnica,
                     as: 'tecnicas',
                     include: [
                         { model: Tecnica, as: 'tecnica' },
                         { model: Parte, as: 'parte' }
                     ]
                 },
-                { 
-                    model: CotizacionTalla, 
+                {
+                    model: CotizacionTalla,
                     as: 'tallas',
                     include: [{ model: Talla, as: 'talla' }]
                 },
-                { 
-                    model: CotizacionColor, 
+                {
+                    model: CotizacionColor,
                     as: 'colores',
                     include: [{ model: Color, as: 'color' }]
                 },
-                { 
-                    model: CotizacionInsumo, 
+                {
+                    model: CotizacionInsumo,
                     as: 'insumos',
                     include: [{ model: Insumo, as: 'insumo' }]
                 }
@@ -61,26 +61,26 @@ exports.getDetalleCotizacionById = async (req, res) => {
             include: [
                 { model: Cotizacion, as: 'cotizacion' },
                 { model: Producto, as: 'producto' },
-                { 
-                    model: CotizacionTecnica, 
+                {
+                    model: CotizacionTecnica,
                     as: 'tecnicas',
                     include: [
                         { model: Tecnica, as: 'tecnica' },
                         { model: Parte, as: 'parte' }
                     ]
                 },
-                { 
-                    model: CotizacionTalla, 
+                {
+                    model: CotizacionTalla,
                     as: 'tallas',
                     include: [{ model: Talla, as: 'talla' }]
                 },
-                { 
-                    model: CotizacionColor, 
+                {
+                    model: CotizacionColor,
                     as: 'colores',
                     include: [{ model: Color, as: 'color' }]
                 },
-                { 
-                    model: CotizacionInsumo, 
+                {
+                    model: CotizacionInsumo,
                     as: 'insumos',
                     include: [{ model: Insumo, as: 'insumo' }]
                 }
@@ -108,18 +108,18 @@ exports.createDetalleCotizacion = async (req, res) => {
         // Validar que la cotización existe
         const cotizacion = await Cotizacion.findByPk(CotizacionID);
         if (!cotizacion) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 message: 'Cotización no encontrada',
-                CotizacionID: CotizacionID 
+                CotizacionID: CotizacionID
             });
         }
 
         // Validar que el producto existe
         const producto = await Producto.findByPk(ProductoID);
         if (!producto) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 message: 'Producto no encontrado',
-                ProductoID: ProductoID 
+                ProductoID: ProductoID
             });
         }
 
@@ -147,7 +147,7 @@ exports.createDetalleCotizacion = async (req, res) => {
 // Actualizar un detalle de cotización
 exports.updateDetalleCotizacion = async (req, res) => {
     try {
-        const { ProductoID, Cantidad, TraePrenda, PrendaDescripcion } = req.body;
+        const { ProductoID, Cantidad, TraePrenda, PrendaDescripcion, PrecioUnitario } = req.body;
 
         const detalleCotizacion = await DetalleCotizacion.findByPk(req.params.id);
 
@@ -159,9 +159,9 @@ exports.updateDetalleCotizacion = async (req, res) => {
         if (ProductoID && ProductoID !== detalleCotizacion.ProductoID) {
             const producto = await Producto.findByPk(ProductoID);
             if (!producto) {
-                return res.status(404).json({ 
+                return res.status(404).json({
                     message: 'Producto no encontrado',
-                    ProductoID: ProductoID 
+                    ProductoID: ProductoID
                 });
             }
         }
@@ -170,8 +170,14 @@ exports.updateDetalleCotizacion = async (req, res) => {
             ProductoID: ProductoID || detalleCotizacion.ProductoID,
             Cantidad: Cantidad || detalleCotizacion.Cantidad,
             TraePrenda: TraePrenda !== undefined ? TraePrenda : detalleCotizacion.TraePrenda,
-            PrendaDescripcion: PrendaDescripcion || detalleCotizacion.PrendaDescripcion
+            PrendaDescripcion: PrendaDescripcion || detalleCotizacion.PrendaDescripcion,
+            PrecioUnitario: PrecioUnitario !== undefined ? PrecioUnitario : detalleCotizacion.PrecioUnitario  // ← agregar
         });
+
+        if (PrecioUnitario !== undefined) {
+            const { calcularValorTotalCotizacion } = require('./cotizacionController');
+            await calcularValorTotalCotizacion(detalleCotizacion.CotizacionID);
+        }
 
         res.json({
             message: 'Detalle de cotización actualizado exitosamente',

@@ -2,39 +2,60 @@ const { Usuario, Rol } = require('../models');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../models');
+const { Op } = require('sequelize');
+
 
 // ==================== OBTENER TODOS LOS USUARIOS ====================
 exports.getAllUsuarios = async (req, res) => {
     try {
-        const usuarios = await Usuario.findAll({
-            include: [
-                {
-                    model: Rol,
-                    as: 'rol',
-                    attributes: ['RolID', 'Nombre']
-                }
-            ],
-            attributes: { exclude: ['Contraseña'] }
+        const page   = Math.max(1, parseInt(req.query.page)  || 1);
+        const limit  = Math.max(1, parseInt(req.query.limit) || 10);
+        const search = (req.query.search || "").trim();
+        const offset = (page - 1) * limit;
+
+        // Solo clientes (RolID = 2) — si no se manda rol, trae todos
+        const rolID  = req.query.rolID ? parseInt(req.query.rolID) : null;
+
+        const where = {};
+        if (rolID) where.RolID = rolID;
+
+        if (search) {
+            where[Op.or] = [
+                { Nombre:      { [Op.like]: `%${search}%` } },
+                { DocumentoID: { [Op.like]: `%${search}%` } },
+                { Correo:      { [Op.like]: `%${search}%` } },
+                { Telefono:    { [Op.like]: `%${search}%` } }
+            ];
+        }
+
+        const { count, rows } = await Usuario.findAndCountAll({
+            where,
+            include: [{ model: Rol, as: 'rol', attributes: ['RolID', 'Nombre'] }],
+            attributes: { exclude: ['Contraseña'] },
+            order: [['Nombre', 'ASC']],
+            limit,
+            offset,
+            distinct: true
         });
 
-        const usuariosFormateados = usuarios.map(usuario => {
-            const usuarioJSON = usuario.toJSON();
-            return {
-                ...usuarioJSON,
-                RolNombre: usuarioJSON.rol ? usuarioJSON.rol.Nombre : null
-            };
+        const usuariosFormateados = rows.map(u => {
+            const j = u.toJSON();
+            return { ...j, RolNombre: j.rol?.Nombre || null };
         });
 
-        res.json(usuariosFormateados);
+        res.json({
+            datos:        usuariosFormateados,
+            total:        count,
+            pagina:       page,
+            totalPaginas: Math.ceil(count / limit),
+            limit
+        });
     } catch (error) {
         console.error('Error al obtener usuarios:', error);
-        res.status(500).json({
-            estado: false,
-            mensaje: 'Error al obtener usuarios',
-            error: error.message
-        });
+        res.status(500).json({ estado: false, mensaje: 'Error al obtener usuarios', error: error.message });
     }
 };
+
 
 // ==================== OBTENER UN USUARIO POR ID ====================
 exports.getUsuarioById = async (req, res) => {

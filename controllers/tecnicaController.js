@@ -155,26 +155,42 @@ exports.updateTecnica = async (req, res) => {
 exports.deleteTecnica = async (req, res) => {
     try {
         const tecnica = await Tecnica.findByPk(req.params.id);
-        
+
         if (!tecnica) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 estado: false,
-                message: 'Técnica no encontrada' 
+                message: 'Técnica no encontrada'
             });
         }
 
         await tecnica.destroy();
-        
-        res.json({ 
+
+        res.json({
             estado: true,
-            message: 'Técnica eliminada exitosamente' 
+            message: 'Técnica eliminada exitosamente'
         });
     } catch (error) {
         console.error('Error en deleteTecnica:', error);
-        res.status(500).json({ 
+
+        // ── Foreign key: la técnica está asociada a diseños de cotizaciones ──
+        const esFKError =
+            error.name === 'SequelizeForeignKeyConstraintError' ||
+            (error.parent?.code === 'ER_ROW_IS_REFERENCED_2') ||
+            (error.original?.code === 'ER_ROW_IS_REFERENCED_2') ||
+            (error.parent?.errno === 1451) ||
+            (error.original?.errno === 1451);
+
+        if (esFKError) {
+            return res.status(409).json({
+                estado: false,
+                message: 'No se puede eliminar esta técnica porque está asociada a uno o más diseños de cotizaciones. Primero elimina o reasigna esos diseños.'
+            });
+        }
+
+        res.status(500).json({
             estado: false,
-            message: 'Error al eliminar técnica', 
-            error: error.message 
+            message: 'Error al eliminar técnica',
+            error: error.message
         });
     }
 };

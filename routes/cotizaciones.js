@@ -38,6 +38,7 @@ router.get('/imagen/:filename', cotizacionController.getImagenDiseno);
 router.get('/', cotizacionController.getAllCotizaciones);
 router.get('/usuario/:documentoID', cotizacionController.getCotizacionesByUsuario);
 router.get('/:id', cotizacionController.getCotizacionById);
+router.put('/detalle/:id', require('../controllers/detallecotizacionController').updateDetalleCotizacion);
 router.put('/:id', cotizacionController.updateCotizacion);
 router.delete('/:id', cotizacionController.deleteCotizacion);
 router.post('/inteligente', cotizacionController.createCotizacionInteligente);

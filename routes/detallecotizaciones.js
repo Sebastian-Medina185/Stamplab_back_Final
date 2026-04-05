@@ -17,4 +17,6 @@ router.put('/:id', detallecotizacionController.updateDetalleCotizacion);
 // DELETE /api/detallecotizaciones/:id - Eliminar un detalle de cotización
 router.delete('/:id', detallecotizacionController.deleteDetalleCotizacion);
 
+
+
 module.exports = router;

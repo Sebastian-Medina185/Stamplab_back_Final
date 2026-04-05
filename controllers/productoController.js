@@ -1,51 +1,59 @@
 // Obtener todos los productos con sus variantes
 const { Producto, InventarioProducto, Color, Talla, Insumo } = require('../models');
+const { Op } = require('sequelize');   
 
 exports.getAllProductos = async (req, res) => {
     try {
-        const productos = await Producto.findAll({
+        // ── Parámetros de paginación y búsqueda ──
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.max(1, parseInt(req.query.limit) || 10);
+        const search = (req.query.search || "").trim();
+        const offset = (page - 1) * limit;
+
+        // ── Filtro WHERE dinámico ──
+        const where = search
+            ? {
+                [Op.or]: [
+                    { Nombre: { [Op.like]: `%${search}%` } },
+                    { Descripcion: { [Op.like]: `%${search}%` } }
+                ]
+            }
+            : {};
+
+        // ── Consulta con paginación ──
+        const { count, rows } = await Producto.findAndCountAll({
+            where,
             include: [
                 {
                     model: InventarioProducto,
                     as: 'inventario',
                     include: [
-                        {
-                            model: Color,
-                            as: 'color',
-                            attributes: ['ColorID', 'Nombre']
-                        },
-                        {
-                            model: Talla,
-                            as: 'talla',
-                            attributes: ['TallaID', 'Nombre', 'Precio']
-                        },
-                        
-                        {
-                            model: Insumo,
-                            as: 'tela',
-                            attributes: ['InsumoID', 'Nombre', 'PrecioTela'],
-                            where: { Tipo: 'Tela' },
-                            required: false 
-                        }
+                        { model: Color, as: 'color', attributes: ['ColorID', 'Nombre'] },
+                        { model: Talla, as: 'talla', attributes: ['TallaID', 'Nombre', 'Precio'] },
+                        { model: Insumo, as: 'tela', attributes: ['InsumoID', 'Nombre', 'PrecioTela'], where: { Tipo: 'Tela' }, required: false }
                     ]
                 }
-            ]
+            ],
+            limit,
+            offset,
+            distinct: true   // necesario para que count sea correcto con includes
         });
 
         res.json({
             estado: true,
             mensaje: 'Productos obtenidos exitosamente',
-            datos: productos
+            datos: rows,
+            total: count,
+            pagina: page,
+            totalPaginas: Math.ceil(count / limit),
+            limit
         });
     } catch (error) {
         console.error('Error al obtener productos:', error);
-        res.status(500).json({
-            estado: false,
-            mensaje: 'Error al obtener productos',
-            error: error.message
-        });
+        res.status(500).json({ estado: false, mensaje: 'Error al obtener productos', error: error.message });
     }
 };
+
 
 // Crear un nuevo producto
 exports.createProducto = async (req, res) => {

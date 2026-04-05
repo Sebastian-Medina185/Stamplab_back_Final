@@ -19,37 +19,92 @@ const { Op } = require('sequelize');
 // Obtener todas las ventas
 exports.getAllVentas = async (req, res) => {
     try {
-        const ventas = await Venta.findAll({
+        const page   = Math.max(1, parseInt(req.query.page)  || 1);
+        const limit  = Math.max(1, parseInt(req.query.limit) || 10);
+        const search = (req.query.search || "").trim();
+        const estado = req.query.estado;
+        const offset = (page - 1) * limit;
+
+        // ── Filtro por estado ──
+        const whereVenta = {};
+        if (estado === "pendientes") {
+            whereVenta.EstadoID = 8;
+        } else if (estado === "procesadas") {
+            whereVenta.EstadoID = { [Op.ne]: 8 };
+        }
+
+        // ── Filtro de búsqueda ──
+        if (search) {
+            if (!isNaN(search)) {
+                whereVenta[Op.or] = [
+                    { VentaID: parseInt(search) },
+                    { '$usuario.Nombre$':      { [Op.like]: `%${search}%` } },
+                    { '$usuario.DocumentoID$': { [Op.like]: `%${search}%` } }
+                ];
+            } else {
+                whereVenta[Op.or] = [
+                    { '$usuario.Nombre$':      { [Op.like]: `%${search}%` } },
+                    { '$usuario.DocumentoID$': { [Op.like]: `%${search}%` } }
+                ];
+            }
+        }
+
+        // ── 1. COUNT: subQuery:false necesario para que $usuario.X$ funcione en WHERE ──
+        const totalCount = await Venta.count({
+            where: whereVenta,
             include: [
                 {
                     model: Usuario,
                     as: 'usuario',
-                    attributes: { exclude: ['Contraseña'] }
+                    attributes: [],
+                    required: !!search
+                }
+            ],
+            subQuery: false
+        });
+
+        // ── 2. QUERY de datos ──
+        // SIN subQuery:false → Sequelize envuelve la query en una subconsulta
+        // para aplicar LIMIT/OFFSET correctamente sobre VentaIDs únicos,
+        // no sobre las filas del JOIN con DetalleVenta.
+        const rows = await Venta.findAll({
+            where: whereVenta,
+            include: [
+                {
+                    model: Usuario,
+                    as: 'usuario',
+                    attributes: { exclude: ['Contraseña'] },
+                    required: !!search
                 },
                 {
                     model: DetalleVenta,
                     as: 'detalles',
                     include: [
                         { model: Producto, as: 'producto' },
-                        { model: Color, as: 'color' },
-                        { model: Talla, as: 'talla' }
+                        { model: Color,    as: 'color'    },
+                        { model: Talla,    as: 'talla'    }
                     ]
                 },
-                {
-                    model: Estado,
-                    as: 'estado'
-                }
+                { model: Estado, as: 'estado' }
             ],
-            order: [['VentaID', 'DESC']]
+            order:    [['VentaID', 'DESC']],
+            limit,
+            offset,
+});
+
+        res.json({
+            datos:        rows,
+            total:        totalCount,
+            pagina:       page,
+            totalPaginas: Math.ceil(totalCount / limit),
+            limit
         });
-        res.json(ventas);
+
     } catch (error) {
-        res.status(500).json({
-            message: 'Error al obtener ventas',
-            error: error.message
-        });
+        res.status(500).json({ message: 'Error al obtener ventas', error: error.message });
     }
 };
+
 
 // Obtener una venta por ID
 exports.getVentaById = async (req, res) => {

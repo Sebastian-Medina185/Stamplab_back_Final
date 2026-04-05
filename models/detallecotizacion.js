@@ -47,18 +47,12 @@ module.exports = (sequelize, DataTypes) => {
         CotizacionID: {
             type: DataTypes.INTEGER,
             allowNull: false,
-            references: {
-                model: 'Cotizaciones',
-                key: 'CotizacionID'
-            }
+            references: { model: 'Cotizaciones', key: 'CotizacionID' }
         },
         ProductoID: {
             type: DataTypes.INTEGER,
-            allowNull: true,  
-            references: {
-                model: 'Productos',
-                key: 'ProductoID'
-            }
+            allowNull: true,
+            references: { model: 'Productos', key: 'ProductoID' }
         },
         Cantidad: {
             type: DataTypes.INTEGER,
@@ -68,7 +62,12 @@ module.exports = (sequelize, DataTypes) => {
             type: DataTypes.BOOLEAN,
             defaultValue: false
         },
-        PrendaDescripcion: DataTypes.TEXT
+        PrendaDescripcion: DataTypes.TEXT,
+        PrecioUnitario: {
+            type: DataTypes.DECIMAL(12, 2),
+            allowNull: true,
+            defaultValue: null
+        }
     }, {
         sequelize,
         modelName: 'DetalleCotizacion',
