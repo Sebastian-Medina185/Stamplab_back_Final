@@ -1,23 +1,12 @@
-const express = require('express');
-const router = express.Router();
-const parteController = require('../controllers/parteController');
-
 // RUTA TEMPORAL - borrar después de usarla
 router.get('/seed/insertar', async (req, res) => {
     try {
         const { Parte } = require('../models');
 
-        const partes = [
-            { Nombre: 'Arriba' },
-            { Nombre: 'Abajo' },
-            { Nombre: 'Frente' },
-            { Nombre: 'Espalda' },
-            { Nombre: 'Derecha' },
-            { Nombre: 'Izquierda' }
-        ];
+        // Eliminar los incorrectos
+        await Parte.destroy({ where: { ParteID: [1, 2, 3] } });
 
-        await Parte.bulkCreate(partes);
-        res.json({ message: 'Partes insertadas correctamente' });
+        res.json({ message: 'Partes incorrectas eliminadas' });
     } catch (error) {
         res.json({ error: error.message });
     }
