@@ -2,6 +2,25 @@ const express = require('express');
 const router = express.Router();
 const parteController = require('../controllers/parteController');
 
+// RUTA TEMPORAL - borrar después de usarla
+router.get('/seed/insertar', async (req, res) => {
+    try {
+        const { Parte } = require('../models');
+
+        const partes = [
+            { Nombre: 'Motor' },
+            { Nombre: 'Transmisión' },
+            { Nombre: 'Frenos' },
+            // ... agrega aquí todas las partes que tenías
+        ];
+
+        await Parte.bulkCreate(partes);
+        res.json({ message: 'Partes insertadas correctamente' });
+    } catch (error) {
+        res.json({ error: error.message });
+    }
+});
+
 // GET /api/partes - Obtener todas las partes
 router.get('/', parteController.getAllPartes);
 
