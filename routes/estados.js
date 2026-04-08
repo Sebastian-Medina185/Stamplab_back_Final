@@ -17,7 +17,7 @@ router.get('/seed', async (req, res) => {
             { Nombre: 'Entregada', Tipo: 'venta', Descripcion: 'Pedido entregado al cliente' },
             { Nombre: 'Cancelada', Tipo: 'venta', Descripcion: 'Venta cancelada' },
         ]);
-        res.json({ ok: true, mensaje: '✅ Estados insertados correctamente' });
+        res.json({ ok: true, mensaje: 'Estados insertados correctamente' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
