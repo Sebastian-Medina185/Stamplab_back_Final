@@ -8,10 +8,12 @@ router.get('/seed/insertar', async (req, res) => {
         const { Parte } = require('../models');
 
         const partes = [
-            { Nombre: 'Motor' },
-            { Nombre: 'Transmisión' },
-            { Nombre: 'Frenos' },
-            // ... agrega aquí todas las partes que tenías
+            { Nombre: 'Arriba' },
+            { Nombre: 'Abajo' },
+            { Nombre: 'Frente' },
+            { Nombre: 'Espalda' },
+            { Nombre: 'Derecha' },
+            { Nombre: 'Izquierda' }
         ];
 
         await Parte.bulkCreate(partes);
