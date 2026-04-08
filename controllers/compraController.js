@@ -1,7 +1,5 @@
 const { Compra, Proveedor, DetalleCompra, Insumo, Producto, InventarioProducto, Color, Talla } = require('../models');
 
-console.log("Asociaciones de Compra:", Object.keys(Compra.associations));
-
 // ─────────────────────────────────────────────────────────────────────────────
 // INCLUDES reutilizables
 // ─────────────────────────────────────────────────────────────────────────────
